@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -10,6 +11,8 @@ namespace ThreadingTutorial
 {
     public class Example2
     {
+        public int size = 8192;
+
         public Example2()
         {
             Console.WriteLine(
@@ -29,7 +32,7 @@ namespace ThreadingTutorial
 
 
             Console.WriteLine(
-                """
+                $$"""
                 When you are threading you must not write the same memory at the same 
                 time as a different thread, and you cannot read memory that is being 
                 written at the same time. This is incredibly important because it can
@@ -55,23 +58,23 @@ namespace ThreadingTutorial
                 NOTE: For a primer an RGB bitmap is an array of bytes of size 
                 w * h * 3. We will create this to store our bitmap.
 
-                byte[] bitmapBytes = new byte[4096 * 4096 * 3];
+                byte[] bitmapBytes = new byte[{{size}} * {{size}} * 3];
 
                 Now lets create a function that writes each pixel in the bitmap:
 
                 public void writeBitmapPixel(byte[] bitmapBytes, int x, int y)
                 {
-                    int index = (y * 4096 + x) * 3;
-                    bitmapBytes[index] = (byte)((y / 4096.0) * 255);
-                    bitmapBytes[index + 1] = (byte)((x / 4096.0) * 255);
+                    int index = (y * {{size}} + x) * 3;
+                    bitmapBytes[index] = (byte)((y / (float){{size}}) * 255);
+                    bitmapBytes[index + 1] = (byte)((x / (float){{size}}) * 255);
                     bitmapBytes[index + 2] = 0;
                 }
 
                 We can now call this for each pixel. 
 
-                for(int y = 0; y < 4096; y++)
+                for(int y = 0; y < {{size}}; y++)
                 {
-                    for (int x = 0; x < 4096; x++)
+                    for (int x = 0; x < {{size}}; x++)
                     {
                         writeBitmapPixel(bitmapBytes, x, y);
                     }
@@ -81,35 +84,75 @@ namespace ThreadingTutorial
                 of the for loops but this can be rather slow, because there is a 
                 TON of overhead for each call to writeBitmapPixel. 
 
-                We can be smarter about the nested for loops, and maybe save some speed.
+                We can be smarter about the nested for loops, and maybe save some speed?
 
                 If you still want to use parallel.for() you can call parallel.for()
                 for each core in your system, manually spreading out the load. 
 
+                But what if we create all the threads manually?
+
+                If I run Example2.Main() in release mode without debugging I get the 
+                following results:
+                
+                Non-threaded bitmap generation took: 312.319 MS
+                
+                Naive-threaded bitmap generation took: 67.398 MS
+                
+                Better-threaded bitmap generation took: 70.1223 MS
+                
+                Better-er-threaded bitmap generation took: 52.1302 MS
+
+                Just threads thread creation time: 0.0401 MS
+                Just threads bitmap generation took: 48.6003 MS
+                Total Just threads bitmap generation took: 48.6404 MS
+
+                Interestingly the nested parallel.for() calls isn't as slow as I expected.
+
+                The just threads method is barely faster and not that much more complex.
+                Plus you get to actually see what is happening, and what resources are allocated.
+                If you wanted to you could even keep the threads alive and send more commands to
+                them with a queue. 
+
+                That will be the next example.
                 """);
         }
 
         public void writeBitmapPixel(byte[] bitmapBytes, int x, int y)
         {
-            int index = (y * 4096 + x) * 3;
-            bitmapBytes[index] = (byte)((y / 4096.0) * 255);
-            bitmapBytes[index + 1] = (byte)((x / 4096.0) * 255);
+            int index = (y * size + x) * 3;
+
+            bitmapBytes[index] = (byte)((y / (float)size) * 255f);
+            bitmapBytes[index + 1] = (byte)((x / (float)size) * 255f);
             bitmapBytes[index + 2] = 0;
         }
 
         public void Main()
         {
             Console.WriteLine("Creating the bitmap data");
-            byte[] bitmapBytes = new byte[4096 * 4096 * 3];
+            byte[] bitmapBytes = new byte[size * size * 3];
 
+            NonThreadedBitmapGeneration(bitmapBytes);
+
+            NaiveThreadedBitmapGeneration(bitmapBytes);
+
+            BetterThreadedBitmapGeneration(bitmapBytes);
+
+            BettererThreadedBitmapGeneration(bitmapBytes);
+
+            JustThreadsBitmapGeneration(bitmapBytes);
+
+        }
+
+        public void NonThreadedBitmapGeneration(byte[] bitmapBytes)
+        {
             Console.WriteLine("Timing how long the non-threaded bitmap generation takes");
 
             Stopwatch timer = new Stopwatch();
             timer.Start();
 
-            for(int y = 0; y < 4096; y++)
+            for (int y = 0; y < size; y++)
             {
-                for (int x = 0; x < 4096; x++)
+                for (int x = 0; x < size; x++)
                 {
                     writeBitmapPixel(bitmapBytes, x, y);
                 }
@@ -120,16 +163,19 @@ namespace ThreadingTutorial
             TimeSpan nonThreadedTime = timer.Elapsed;
 
             Console.WriteLine($"Non-threaded bitmap generation took: {nonThreadedTime.TotalMilliseconds} MS");
+        }
 
+        public void NaiveThreadedBitmapGeneration(byte[] bitmapBytes)
+        {
             Console.WriteLine("Timing how long the naive-threaded bitmap generation takes");
 
+            Stopwatch timer = new Stopwatch();
             timer.Start();
 
-
             // NOTE: this feels really dumb to do
-            Parallel.For(0, 4096, (y) =>
+            Parallel.For(0, size, (y) =>
             {
-                Parallel.For(0, 4096, (x) =>
+                Parallel.For(0, size, (x) =>
                 {
                     writeBitmapPixel(bitmapBytes, x, y);
                 });
@@ -141,20 +187,24 @@ namespace ThreadingTutorial
 
             Console.WriteLine($"Naive-threaded bitmap generation took: {naiveThreadedTime.TotalMilliseconds} MS");
 
+        }
 
+        public void BetterThreadedBitmapGeneration(byte[] bitmapBytes)
+        {
             Console.WriteLine("Timing how long the better-threaded bitmap generation takes");
 
+            Stopwatch timer = new Stopwatch();
             timer.Start();
 
             // NOTE: each pixel is 3 bytes, so we do not multiply this by 3, unlike the 
             // bitmapBytes length.
-            int totalPixels = 4096 * 4096;
+            int totalPixels = size * size;
 
             // NOTE: this is better
-            Parallel.For(0, totalPixels , (index) =>
+            Parallel.For(0, totalPixels, (index) =>
             {
-                int y = index / 4096;
-                int x = index % 4096;
+                int y = index / size;
+                int x = index % size;
 
                 writeBitmapPixel(bitmapBytes, x, y);
             });
@@ -165,26 +215,45 @@ namespace ThreadingTutorial
 
             Console.WriteLine($"Better-threaded bitmap generation took: {betterThreadedTime.TotalMilliseconds} MS");
 
+        }
+
+        public void BettererThreadedBitmapGeneration(byte[] bitmapBytes)
+        {
             Console.WriteLine("Timing how long the better-er-threaded bitmap generation takes");
 
+            Stopwatch timer = new Stopwatch();
             timer.Start();
 
-            // NOTE: this is better
-
+            int totalPixels = size * size;
             int processorCount = Environment.ProcessorCount;
             int perCorePixelCount = totalPixels / processorCount;
 
             // because we split the load over many threads we MIGHT have leftovers due to the need to use integer division.
-            // this is guarenteed 
+            // this is guarenteed to be the processorCount or less.
             int leftovers = totalPixels - (perCorePixelCount * processorCount);
 
-            Parallel.For(0, processorCount, (index) =>
+            Parallel.For(0, processorCount, (core) =>
             {
-                int y = index / 4096;
-                int x = index % 4096;
+                int start = core * perCorePixelCount;
+                int end = (core + 1) * perCorePixelCount;
+
+                for (int index = start; index < end; index++)
+                {
+                    int y = index / size;
+                    int x = index % size;
+
+                    writeBitmapPixel(bitmapBytes, x, y);
+                }
+            });
+
+            // the main thread can do the leftovers
+            for (int index = totalPixels - leftovers; index < totalPixels; index++)
+            {
+                int y = index / size;
+                int x = index % size;
 
                 writeBitmapPixel(bitmapBytes, x, y);
-            });
+            }
 
             timer.Stop();
 
@@ -192,6 +261,83 @@ namespace ThreadingTutorial
 
             Console.WriteLine($"Better-er-threaded bitmap generation took: {bettererThreadedTime.TotalMilliseconds} MS");
 
+        }
+
+        public void JustThreadsBitmapGeneration(byte[] bitmapBytes)
+        {
+            Console.WriteLine("Timing how long the just threads bitmap generation takes");
+
+            Stopwatch timer = new Stopwatch();
+            timer.Start();
+
+            int totalPixels = size * size;
+            int processorCount = Environment.ProcessorCount;
+            int perCorePixelCount = totalPixels / processorCount;
+
+            // because we split the load over many threads we MIGHT have leftovers due to the need to use integer division.
+            // this is guarenteed to be the processorCount or less.
+            int leftovers = totalPixels - (perCorePixelCount * processorCount);
+
+            Stopwatch creationTimer = new Stopwatch();
+            creationTimer.Start();
+
+            Thread[] threads = new Thread[processorCount];
+
+            //create threads
+            for (int i = 0; i < processorCount; i++)
+            {
+                // this is captured by the lamda
+                int core = i;
+
+                threads[i] = new Thread(() =>
+                {
+                    int start = core * perCorePixelCount;
+                    int end = (core + 1) * perCorePixelCount;
+
+                    for (int index = start; index < end; index++)
+                    {
+                        int y = index / size;
+                        int x = index % size;
+
+                        writeBitmapPixel(bitmapBytes, x, y);
+                    }
+                });
+
+                threads[i].IsBackground = true;
+            }
+
+            creationTimer.Stop();
+
+            // start threads
+            for(int i = 0; i < processorCount; i++)
+            {
+                threads[i].Start();
+            }
+
+            // the main thread can do the leftovers
+            for (int index = totalPixels - leftovers; index < totalPixels; index++)
+            {
+                int y = index / size;
+                int x = index % size;
+
+                writeBitmapPixel(bitmapBytes, x, y);
+            }
+
+            // wait for threads to finish
+            for (int i = 0; i < processorCount; i++)
+            {
+                Console.WriteLine($"Calling thread.Join() to wait for thread {i}");
+                threads[i].Join();
+            }
+
+            timer.Stop();
+
+            TimeSpan justThreadsTime = timer.Elapsed;
+            TimeSpan threadCreationTime = creationTimer.Elapsed;
+
+            Console.WriteLine($"Just threads thread creation time: {threadCreationTime.TotalMilliseconds} MS");
+            Console.WriteLine($"Just threads bitmap generation took: {(justThreadsTime - threadCreationTime).TotalMilliseconds} MS");
+            Console.WriteLine($"Total Just threads bitmap generation took: {justThreadsTime.TotalMilliseconds} MS");
         }
     }
 }

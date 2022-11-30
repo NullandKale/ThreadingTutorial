@@ -10,6 +10,7 @@
             example1.Main();
 
             Console.WriteLine("For the next tutorial press any key");
+            Console.WriteLine("\n\n\n\n\n\n");
             Console.ReadKey();
 
             Example2 example2 = new Example2();
